@@ -1,0 +1,89 @@
+name: marketplace-platform
+
+services:
+  postgres:
+    image: 'postgres:16'
+    container_name: marketplace-postgres
+    environment:
+      POSTGRES_DB: marketplace
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - marketplace-postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - marketplace-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.5
+    container_name: marketplace-keycloak
+    command:
+      - start-dev
+    ports:
+      - "8080:8080"
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      KC_DB_SCHEMA: public
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_FEATURES: preview
+      KC_HEALTH_ENABLED: true
+      KC_METRICS_ENABLED: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - marketplace-net
+    restart: unless-stopped
+    volumes:
+      - ./keycloak-data/import:/opt/keycloak/data/import:ro
+      - ./keycloak-data/themes:/opt/keycloak/themes:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: marketplace-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@marketplace.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_LISTEN_PORT: 5050
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:5050"
+    networks:
+      - marketplace-net
+    restart: unless-stopped
+    volumes:
+      - marketplace-pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  marketplace-postgres-data:
+    name: marketplace-postgres-data
+  marketplace-pgadmin-data:
+    name: marketplace-pgadmin-data
+
+networks:
+  marketplace-net:
+    name: marketplace-net
+    driver: bridge
